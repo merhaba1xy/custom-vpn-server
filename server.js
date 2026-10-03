@@ -1,8 +1,17 @@
 const WebSocket = require('ws');
 const net = require('net');
+const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+
+// 1. Render'ın aktif görebilmesi için basit bir HTTP sunucusu oluşturuyoruz
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Tunnel Server Active\n');
+});
+
+// 2. WebSocket sunucusunu bu HTTP sunucusu üzerine kuruyoruz
+const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
   let targetClient = null;
@@ -33,4 +42,17 @@ wss.on('connection', (ws) => {
   ws.on('error', () => targetClient && targetClient.destroy());
 });
 
-console.log(`Tünel Sunucusu ${PORT} portunda dinliyor...`);
+// 3. Sunucuyu başlatıyoruz
+server.listen(PORT, () => {
+  console.log(`Tünel Sunucusu ve HTTP Pinger ${PORT} portunda dinliyor...`);
+});
+
+// 4. Otomatik Self-Pinger (Her 10 dakikada bir kendi Render URL'sine istek atar)
+const RENDER_URL = 'https://custom-vpn-server.onrender.com';
+setInterval(() => {
+  http.get(RENDER_URL, (res) => {
+    console.log(`[Pinger] Self-ping gönderildi. Durum: ${res.statusCode}`);
+  }).on('error', (err) => {
+    console.error('[Pinger] Self-ping hatası:', err.message);
+  });
+}, 10 * 60 * 1000); // 10 dakikada bir
