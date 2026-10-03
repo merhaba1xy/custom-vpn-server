@@ -1,31 +1,48 @@
 const WebSocket = require('ws');
 const net = require('net');
 
-const wss = new WebSocket.Server({ port: 8080 });
+// Render'ın atadığı dinamik portu veya varsayılan 8080'i dinle
+const PORT = process.env.PORT || 8080;
+const wss = new WebSocket.Server({ port: PORT });
 
 wss.on('connection', (ws) => {
+  let targetClient = null;
+
   ws.on('message', (message) => {
-    if (message.length < 3) return;
-    const targetPort = message.readUInt16BE(0);
-    const hostLen = message.readUInt8(2);
-    const targetHost = message.toString('utf8', 3, 3 + hostLen);
-    const payload = message.slice(3 + hostLen);
+    // İlk pakette hedef adres bilgisi gelir
+    if (!targetClient && message.length >= 3) {
+      const targetPort = message.readUInt16BE(0);
+      const hostLen = message.readUInt8(2);
+      const targetHost = message.toString('utf8', 3, 3 + hostLen);
 
-    const client = net.createConnection({ port: targetPort, host: targetHost }, () => {
-      client.write(payload);
-    });
+      targetClient = net.createConnection({ port: targetPort, host: targetHost }, () => {
+        // Hedef sunucuya bağlandı
+      });
 
-    client.on('data', (data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
-    });
+      targetClient.on('data', (data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
 
-    socketErrorCleanup(client, ws);
+      targetClient.on('error', () => ws.close());
+      targetClient.on('close', () => ws.close());
+      return;
+    }
+
+    // Sonraki verileri doğrudan hedefe yaz
+    if (targetClient && !targetClient.destroyed) {
+      targetClient.write(message);
+    }
+  });
+
+  ws.on('close', () => {
+    if (targetClient) targetClient.destroy();
+  });
+
+  ws.on('error', () => {
+    if (targetClient) targetClient.destroy();
   });
 });
 
-function socketErrorCleanup(client, ws) {
-  client.on('error', () => ws.close());
-  ws.on('error', () => client.destroy());
-}
-
-console.log('Tünel Sunucusu (server.js) 8080 portunda dinliyor...');
+console.log(`Tünel Sunucusu ${PORT} portunda çalışıyor...`);
